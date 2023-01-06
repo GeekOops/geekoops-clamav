@@ -2,7 +2,7 @@
 
 # ansible role for setting up clamav and fangfrisch
 
-Configurable ansible role for setting up clamav and additional signature databases via fangfrisch(https://github.com/rseichter/fangfrisch/blob/master/docs/fangfrisch.adoc)
+Configurable ansible role for setting up clamav and additional signature databases via fangfrisch(https://github.com/rseichter/fangfrisch)
 Works with
 
 - openSUSE Leap 15.4 -> tested
