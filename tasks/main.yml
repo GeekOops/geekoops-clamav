@@ -1,0 +1,118 @@
+---
+- name: Create a weekly cronjob to check for updates of installed packages
+  ansible.builtin.cron:
+    name: "automatic-update"
+    special_time: weekly
+    state: present
+    job: "zypper ref && zypper up --skip-interactive --auto-agree-with-licenses"
+
+- name: Ensure clamav is installed.
+  package:
+    name: 
+      - "{{ clamav_package }}"
+      - python3-sqlalchemy
+    state: present
+
+# clamd won't start if /var/lib/clamav doesn't contain the daily and main databases,
+# therefore freshclam needs to be executed once.
+- name: Execute freshclam
+  systemd:
+    name: freshclam
+    state: started
+
+- name: Making sure temporary location is empty.
+  ansible.builtin.file:
+    path: /tmp/fangfrisch
+    state: absent
+
+#  Now we need to setup fangfrisch to add other virus databases into clamav
+- name: Git checkout of fangfrisch
+  ansible.builtin.git:
+    repo: https://github.com/rseichter/fangfrisch
+    dest: /tmp/fangfrisch
+    force: true
+
+- name: Apply patch for python 3.6 - 1
+#  when: ansible_python_version is version('3.7', '<')
+  ansible.builtin.lineinfile:
+    path: /tmp/fangfrisch/fangfrisch/util.py
+    regexp: "^from subprocess import run"
+    line: "from subprocess import run, PIPE"
+
+
+- name: Apply patch for python 3.6 - 1
+#  when: ansible_python_version is version('3.7', '<')
+  ansible.builtin.lineinfile:
+    path: /tmp/fangfrisch/fangfrisch/util.py
+    regexp: ".*capture_output=True.*"
+    line: "        p = run(command, stdout=PIPE, stderr=PIPE, encoding='utf-8', shell=True, timeout=timeout)"
+
+
+- name: create fangfrisch signature folder
+  ansible.builtin.file:
+    state: directory
+    path: /var/lib/fangfrisch/signatures
+    mode: '0770'
+    group: vscan
+
+- name: create fangfrisch folder
+  ansible.builtin.file:
+    state: directory
+    path: "{{ fangfrisch_prefix }}"
+    mode: '0770'
+    group: vscan
+
+- name: install fangfrisch
+  ansible.builtin.shell: |
+    chown -R vscan:vscan /tmp/fangfrisch
+    cd /tmp/fangfrisch
+    sudo -u vscan sed -i -e '/SQLAlchemy/d' setup.py
+    sudo -u vscan python3 setup.py build
+    sudo -u vscan python3 setup.py install --root={{ fangfrisch_prefix }} --optimize=1 --skip-build
+
+- name: get a helper script to check the validiy of signatures
+  ansible.builtin.get_url:
+    url: https://gitlab.com/frehi/setup-clamav-sigs/-/raw/master/setup-clamav-sigs
+    dest: /usr/local/bin/setup-clamav-sigs
+    mode: '0755'
+
+- name: create a config file for fangfrisch
+  ansible.builtin.template:
+    src: fangfrisch.conf.j2
+    dest: /etc/fangfrisch.conf
+    owner: root
+    group: vscan
+    mode: '0640'
+
+- name: fix permissions
+  ansible.builtin.file:
+    state: directory
+    path: "{{ fangfrisch_prefix}}"
+    group: "vscan"
+    recurse: true
+
+- name: initializing fangfrisch
+  ansible.builtin.shell: "sudo -u vscan PYTHONPATH={{ fangfrisch_prefix}}/usr/lib/python3.6/site-packages/  {{ fangfrisch_prefix}}/usr/bin/fangfrisch --conf /etc/fangfrisch.conf initdb --force"
+
+- name: create cronjob for signature updates
+  ansible.builtin.cron:
+    name: fangfrisch-signature-refresh
+    state: present
+    special_time: daily
+    user: vscan
+    job: PYTHONPATH={{ fangfrisch_prefix}}/usr/lib/python3.6/site-packages/ {{ fangfrisch_prefix }}/usr/bin/fangfrisch --conf /etc/fangfrisch.conf refresh
+
+name: Adding a whitelist file for clamd
+  copy:
+    content: "# The signatures listed here will be whitelisted:\n"
+    dest: /var/lib/clamav/whitelist.ign2
+    force: no
+    owner: vscan
+    group: vscan
+    mode: 0644
+
+- name: Enable clamd and make sure it is running
+  systemd:
+    name: clamd
+    enabled: yes
+    state: started
