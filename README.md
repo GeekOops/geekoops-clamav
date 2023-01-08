@@ -41,6 +41,7 @@ An advanced example for the imaginary `jellyfish` test server
 MIT
 
 # Development
+A tutorial on fangfrisch: https://blog.frehi.be/2021/01/25/using-fangfrisch-to-improve-malware-e-mail-detection-with-clamav/
 
 ## Add githooks
 
